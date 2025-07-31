@@ -1,74 +1,259 @@
-const path = require('path');
-const webpack = require('webpack');
-const MiniCssExtractPlugin = require('mini-css-extract-plugin');
-const TerserPlugin = require('terser-webpack-plugin');
-const { DefinePlugin } = require('webpack');
-const dotenv = require('dotenv');
+require("dotenv").config();
+const path = require("path");
+const TerserPlugin = require("terser-webpack-plugin");
+const { DefinePlugin, optimize } = require("webpack");
+const chalk = require("chalk");
 
-// Load environment variables
-const env = dotenv.config().parsed;
+/**
+ *
+ * @param {Object} [options]
+ * @param {string} [options.appEntry=./src/index.tsx]
+ * @param {string} [options.backendHost]
+ * @param {Object} [options.devConfig]
+ * @param {number} [options.devConfig.port]
+ * @param {boolean} [options.devConfig.enableHmr]
+ * @param {boolean} [options.devConfig.enableHttps]
+ * @param {string} [options.devConfig.appOrigin]
+ * @param {string} [options.devConfig.appId] - Deprecated in favour of appOrigin
+ * @param {string} [options.devConfig.certFile]
+ * @param {string} [options.devConfig.keyFile]
+ * @returns {Object}
+ */
+function buildConfig({
+  devConfig,
+  appEntry = path.join(__dirname, "src", "index.tsx"),
+  backendHost = process.env.CANVA_BACKEND_HOST,
+} = {}) {
+  const mode = devConfig ? "development" : "production";
 
-// Create environment variables to pass to the client
-const envKeys = Object.keys(env || {}).reduce((prev, next) => {
-  prev[`process.env.${next}`] = JSON.stringify(env[next]);
-  return prev;
-}, {});
-
-module.exports = (env) => {
-  const isProduction = env.mode === 'production';
+  if (!backendHost) {
+    console.error(
+      chalk.redBright.bold("BACKEND_HOST is undefined."),
+      `Refer to "Customizing the backend host" in the README.md for more information.`
+    );
+    process.exit(-1);
+  } else if (backendHost.includes("localhost") && mode === "production") {
+    console.error(
+      chalk.redBright.bold(
+        "BACKEND_HOST should not be set to localhost for production builds!"
+      ),
+      `Refer to "Customizing the backend host" in the README.md for more information.`
+    );
+  }
 
   return {
-    entry: './src/index.tsx',
-    output: {
-      path: path.resolve(__dirname, 'dist'),
-      filename: 'bundle.js',
-      publicPath: '/',
+    mode,
+    context: path.resolve(__dirname, "./"),
+    entry: {
+      app: appEntry,
     },
-    mode: isProduction ? 'production' : 'development',
-    devtool: isProduction ? 'source-map' : 'eval-cheap-module-source-map',
+    target: "web",
     resolve: {
-      extensions: ['.tsx', '.ts', '.js', '.jsx'],
       alias: {
-        '@': path.resolve(__dirname, 'src'),
+        assets: path.resolve(__dirname, "assets"),
+        utils: path.resolve(__dirname, "utils"),
+        styles: path.resolve(__dirname, "styles"),
+        src: path.resolve(__dirname, "src"),
       },
+      extensions: [".ts", ".tsx", ".js", ".css", ".svg", ".woff", ".woff2"],
+    },
+    infrastructureLogging: {
+      level: "none",
     },
     module: {
       rules: [
         {
-          test: /\.(ts|tsx)$/,
-          use: 'ts-loader',
+          test: /\.tsx?$/,
           exclude: /node_modules/,
-        },
-        {
-          test: /\.(css)$/,
           use: [
-            isProduction ? MiniCssExtractPlugin.loader : 'style-loader',
-            'css-loader',
+            {
+              loader: "ts-loader",
+              options: {
+                transpileOnly: true,
+              },
+            },
           ],
         },
         {
-          test: /\.(png|jpe?g|gif|svg)$/i,
-          type: 'asset/resource',
-          generator: {
-            filename: 'assets/[hash][ext][query]',
-          },
+          test: /\.css$/,
+          exclude: /node_modules/,
+          use: [
+            "style-loader",
+            {
+              loader: "css-loader",
+              options: {
+                modules: true,
+              },
+            },
+            {
+              loader: "postcss-loader",
+              options: {
+                postcssOptions: {
+                  plugins: [require("cssnano")({ preset: "default" })],
+                },
+              },
+            },
+          ],
+        },
+        {
+          test: /\.(png|jpg|jpeg)$/i,
+          type: "asset/inline",
+        },
+        {
+          test: /\.(woff|woff2)$/,
+          type: "asset/inline",
+        },
+        {
+          test: /\.svg$/,
+          oneOf: [
+            {
+              issuer: /\.[jt]sx?$/,
+              resourceQuery: /react/, // *.svg?react
+              use: ["@svgr/webpack", "url-loader"],
+            },
+            {
+              type: "asset/resource",
+              parser: {
+                dataUrlCondition: {
+                  maxSize: 200,
+                },
+              },
+            },
+          ],
+        },
+        {
+          test: /\.css$/,
+          include: /node_modules/,
+          use: [
+            "style-loader",
+            "css-loader",
+            {
+              loader: "postcss-loader",
+              options: {
+                postcssOptions: {
+                  plugins: [require("cssnano")({ preset: "default" })],
+                },
+              },
+            },
+          ],
         },
       ],
     },
-    plugins: [
-      new DefinePlugin(envKeys),
-      isProduction && new MiniCssExtractPlugin({ filename: 'styles.css' }),
-      !isProduction && new webpack.HotModuleReplacementPlugin(),
-    ].filter(Boolean),
     optimization: {
-      minimize: isProduction,
-      minimizer: [new TerserPlugin()],
+      minimizer: [
+        new TerserPlugin({
+          terserOptions: {
+            format: {
+              // Turned on because emoji and regex is not minified properly using default
+              // https://github.com/facebook/create-react-app/issues/2488
+              ascii_only: true,
+            },
+          },
+        }),
+      ],
     },
-    devServer: {
-      static: path.join(__dirname, 'public'),
-      historyApiFallback: true,
-      hot: true,
-      open: true,
+    output: {
+      filename: mode === 'development' ?`[name].js` : `enlarger.[hash].${new Date().toString()}.js`,
+      path: path.resolve(__dirname, "dist"),
+      clean: true,
+    },
+    plugins: [
+      new DefinePlugin({
+        BACKEND_HOST: JSON.stringify(backendHost),
+      }),
+      // Apps can only submit a single JS file via the developer portal
+      new optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
+    ],
+    ...buildDevConfig(devConfig),
+  };
+}
+
+/**
+ *
+ * @param {Object} [options]
+ * @param {number} [options.port]
+ * @param {boolean} [options.enableHmr]
+ * @param {boolean} [options.enableHttps]
+ * @param {string} [options.appOrigin]
+ * @param {string} [options.appId] - Deprecated in favour of appOrigin
+ * @param {string} [options.certFile]
+ * @param {string} [options.keyFile]
+ * @returns {Object|null}
+ */
+function buildDevConfig(options) {
+  if (!options) {
+    return null;
+  }
+
+  const { port, enableHmr, appOrigin, appId, enableHttps, certFile, keyFile } = options;
+
+  let devServer = {
+    server: enableHttps
+      ? {
+          type: "https",
+          options: {
+            cert: certFile,
+            key: keyFile,
+          },
+        }
+      : "http",
+    host: "localhost",
+    historyApiFallback: {
+      rewrites: [{ from: /^\/$/, to: "/app.js" }],
+    },
+    port,
+    client: {
+      logging: "verbose",
+    },
+    static: {
+      directory: path.resolve(__dirname, "assets"),
+      publicPath: "/assets",
     },
   };
-};
+
+  if (enableHmr && appOrigin) {
+    devServer = {
+      ...devServer,
+      allowedHosts: new URL(appOrigin).hostname,
+      headers: {
+        "Access-Control-Allow-Origin": appOrigin,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Private-Network": "true",
+      },
+    };
+  } else if (enableHmr && appId) {
+    // Deprecated - App ID should not be used to configure HMR in the future and can be safely removed
+    // after a few months.
+
+    console.warn(
+      "Enabling Hot Module Replacement (HMR) with an App ID is deprecated, please see the README.md on how to update."
+    );
+
+    const appDomain = `app-${appId.toLowerCase().trim()}.canva-apps.com`;
+    devServer = {
+      ...devServer,
+      allowedHosts: appDomain,
+      headers: {
+        "Access-Control-Allow-Origin": `https://${appDomain}`,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Private-Network": "true",
+      },
+    };
+  } else {
+    if (enableHmr && !appOrigin) {
+      console.warn(
+        "Attempted to enable Hot Module Replacement (HMR) without configuring App Origin... Disabling HMR."
+      );
+    }
+    devServer.webSocketServer = false;
+  }
+
+  return {
+    devtool: "source-map",
+    devServer,
+  };
+}
+
+module.exports = () => buildConfig();
+
+module.exports.buildConfig = buildConfig;
