@@ -1,0 +1,10 @@
+{
+  "extends": "../.eslintrc.json",
+  "env": {
+    "node": true
+  },
+  "rules": {
+    "@typescript-eslint/no-floating-promises": "off",
+    "@typescript-eslint/explicit-member-accessibility": "off"
+  }
+}
