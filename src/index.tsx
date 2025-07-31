@@ -1,16 +1,22 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import MirrorFlipApp from './app';
-
-// Create a client
-const queryClient = new QueryClient();
-
-const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
-root.render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <MirrorFlipApp />
+import { AppUiProvider } from "@canva/app-ui-kit";
+import { createRoot } from "react-dom/client";
+import { App } from "./app";
+import "@canva/app-ui-kit/styles.css";
+import { QueryClient, QueryClientProvider} from '@tanstack/react-query'
+const root = createRoot(document.getElementById("root") as Element);
+const client = new QueryClient()
+function render() {
+  root.render(
+    <AppUiProvider>
+    <QueryClientProvider client={client}>
+      <App />
     </QueryClientProvider>
-  </React.StrictMode>
-);
+    </AppUiProvider>
+  );
+}
+
+render();
+
+if (module.hot) {
+  module.hot.accept("./app", render);
+}
